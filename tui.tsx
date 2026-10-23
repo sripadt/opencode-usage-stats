@@ -175,20 +175,24 @@ function UsagePanel(props: {
         fallback={<text fg={theme.text.muted}>{props.error() ?? "Loading usage…"}</text>}
       >
         {(value) => {
-          const stats = value()
-          const rate = successRate(stats)
-          const rateText = rate === undefined ? undefined : `${rate.toFixed(1)}%`
+          // Keep the accessor: Show does not re-run its child when stats change.
+          const stats = value
+          const rate = () => successRate(stats())
+          const rateText = () => {
+            const current = rate()
+            return current === undefined ? undefined : `${current.toFixed(1)}%`
+          }
           return (
             <box flexDirection="column" gap={0}>
-              <text fg={theme.text.base}>{`${stats.sessions} sessions · ${stats.prompts} prompts`}</text>
-              <text fg={theme.text.base}>{`${stats.steps} steps · ${compact(totalTokens(stats.tokens))} tokens`}</text>
-              <text fg={theme.text.muted}>{`${money(stats.cost)} · ${stats.activeDays} active days`}</text>
+              <text fg={theme.text.base}>{`${stats().sessions} sessions · ${stats().prompts} prompts`}</text>
+              <text fg={theme.text.base}>{`${stats().steps} steps · ${compact(totalTokens(stats().tokens))} tokens`}</text>
+              <text fg={theme.text.muted}>{`${money(stats().cost)} · ${stats().activeDays} active days`}</text>
               <text fg={theme.text.muted}>
-                {rateText ? `tools ${rateText} · ${stats.streak}d streak` : `${stats.streak}d streak`}
+                {rateText() ? `tools ${rateText()} · ${stats().streak}d streak` : `${stats().streak}d streak`}
               </text>
               <text fg={theme.text.muted}>MODELS</text>
-              <Show when={stats.models.length > 0} fallback={<text fg={theme.text.muted}>no model usage yet</text>}>
-                <For each={stats.models.slice(0, props.limit)}>
+              <Show when={stats().models.length > 0} fallback={<text fg={theme.text.muted}>no model usage yet</text>}>
+                <For each={stats().models.slice(0, props.limit)}>
                   {(model) => (
                     <text fg={theme.text.base} wrapMode="none" truncate>
                       {`${truncate(model.model.id, 22).padEnd(22)} ${compact(totalTokens(model.tokens)).padStart(5)}`}
@@ -219,10 +223,11 @@ function HomeStatus(props: {
   return (
     <Show when={props.stats()}>
       {(value) => {
-        const stats = value()
+        // Keep the accessor so refreshes update the footer without remounting.
+        const stats = value
         return (
           <text fg={props.theme.text.muted}>
-            {`${RANGE_SHORT[props.range()]} · ${compact(totalTokens(stats.tokens))} tok · ${money(stats.cost)} · ${stats.sessions} chats`}
+            {`${RANGE_SHORT[props.range()]} · ${compact(totalTokens(stats().tokens))} tok · ${money(stats().cost)} · ${stats().sessions} chats`}
           </text>
         )
       }}
@@ -359,7 +364,7 @@ export default Plugin.define({
           bind: "ctrl+alt+r",
           palette: true,
           slash: { name: "usage-range", arguments: true },
-          run: (input) => {
+          run: async (input) => {
             const argument = resolveRangeInput(input)
             if (argument.invalid) {
               context.ui.toast.show({
@@ -369,14 +374,6 @@ export default Plugin.define({
               return
             }
             const range = argument.range ?? nextRange(currentRange())
-            void updateSettings((draft) => {
-              draft.range = range
-            })
-            void refresh(true)
-            context.ui.toast.show({
-              message: `Usage range: ${RANGE_LABELS[range]}`,
-              variant: "info",
-            })
             if (input?.trim()) {
               try {
                 context.keymap.dispatch("prompt.clear")
@@ -384,6 +381,14 @@ export default Plugin.define({
                 // The prompt may not be focused when invoked outside slash completion.
               }
             }
+            await updateSettings((draft) => {
+              draft.range = range
+            })
+            void refresh(true)
+            context.ui.toast.show({
+              message: `Usage range: ${RANGE_LABELS[range]}`,
+              variant: "info",
+            })
           },
         },
         {
